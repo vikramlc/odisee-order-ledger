@@ -2,7 +2,7 @@
 
 from .errors import IdempotencyConflict, InvalidCursor, OrderNotFound, ValidationError
 from .models import LineItem, Order
-from .service import OrderService
+from .service import OrderService, Page
 from .store import OrderStore
 
 __all__ = [
@@ -13,5 +13,6 @@ __all__ = [
     "OrderNotFound",
     "OrderService",
     "OrderStore",
+    "Page",
     "ValidationError",
 ]

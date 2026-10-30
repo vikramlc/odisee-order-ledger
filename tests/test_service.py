@@ -50,3 +50,21 @@ def test_list_orders_oldest_first_and_scoped(service):
 def test_ids_are_unique(service):
     ids = {service.create_order("cus_1", [item()]).id for _ in range(20)}
     assert len(ids) == 20
+
+
+def test_list_orders_page_walks_all_pages(service):
+    orders = [service.create_order("cus_1", [item()]) for _ in range(5)]
+    first = service.list_orders_page("cus_1", limit=2)
+    second = service.list_orders_page("cus_1", limit=2, cursor=first.next_cursor)
+    last = service.list_orders_page("cus_1", limit=2, cursor=second.next_cursor)
+    assert [o.id for o in first.items + second.items + last.items] == [o.id for o in orders]
+    assert last.next_cursor is None
+
+
+def test_list_orders_page_rejects_bad_limit_and_cursor(service):
+    from order_ledger import InvalidCursor
+
+    with pytest.raises(ValidationError):
+        service.list_orders_page("cus_1", limit=0)
+    with pytest.raises(InvalidCursor):
+        service.list_orders_page("cus_1", cursor="???")
