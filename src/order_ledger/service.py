@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .errors import OrderNotFound, ValidationError
+from .errors import IdempotencyConflict, OrderNotFound, ValidationError
 from .models import LineItem, Order
 from .store import OrderStore
 
@@ -12,9 +12,15 @@ MAX_ITEMS_PER_ORDER = 50
 class OrderService:
     def __init__(self, store: OrderStore | None = None) -> None:
         self.store = store or OrderStore()
+        # (customer_id, idempotency_key) -> (normalized items, order id)
+        self._idempotency: dict[tuple[str, str], tuple[tuple[LineItem, ...], str]] = {}
 
-    def create_order(self, customer_id: str, items: Iterable[dict]) -> Order:
-        """Create an order from raw item dicts: {"sku", "quantity", "unit_price_cents"}."""
+    def create_order(self, customer_id: str, items: Iterable[dict], idempotency_key: str | None = None) -> Order:
+        """Create an order from raw item dicts: {"sku", "quantity", "unit_price_cents"}.
+
+        With an idempotency key, a retry with the same items returns the original
+        order, and a reuse with different items raises IdempotencyConflict.
+        """
         if not customer_id:
             raise ValidationError("customer_id is required")
         line_items = tuple(self._line_item(raw) for raw in items)
@@ -22,7 +28,20 @@ class OrderService:
             raise ValidationError("an order needs at least one item")
         if len(line_items) > MAX_ITEMS_PER_ORDER:
             raise ValidationError(f"at most {MAX_ITEMS_PER_ORDER} items per order")
-        return self.store.insert(customer_id, line_items)
+        if idempotency_key is None:
+            return self.store.insert(customer_id, line_items)
+        slot = (customer_id, idempotency_key)
+        previous = self._idempotency.get(slot)
+        if previous is not None:
+            seen_items, order_id = previous
+            if seen_items != line_items:
+                raise IdempotencyConflict(idempotency_key)
+            order = self.store.get(order_id)
+            assert order is not None
+            return order
+        order = self.store.insert(customer_id, line_items)
+        self._idempotency[slot] = (line_items, order.id)
+        return order
 
     def get_order(self, customer_id: str, order_id: str) -> Order:
         order = self.store.get(order_id)

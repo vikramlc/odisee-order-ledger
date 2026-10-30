@@ -50,3 +50,14 @@ def test_list_orders_oldest_first_and_scoped(service):
 def test_ids_are_unique(service):
     ids = {service.create_order("cus_1", [item()]).id for _ in range(20)}
     assert len(ids) == 20
+
+
+def test_idempotent_replay_and_conflict(service):
+    from order_ledger import IdempotencyConflict
+
+    first = service.create_order("cus_1", [item()], idempotency_key="k")
+    assert service.create_order("cus_1", [item()], idempotency_key="k").id == first.id
+    with pytest.raises(IdempotencyConflict):
+        service.create_order("cus_1", [item(price=1)], idempotency_key="k")
+    assert service.create_order("cus_2", [item()], idempotency_key="k").id != first.id
+    assert service.store.count() == 2
